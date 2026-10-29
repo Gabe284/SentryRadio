@@ -892,21 +892,62 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
 
     fun installHardeningModule(context: Context) {
         viewModelScope.launch {
-            if (!_dashboardState.value.hasRoot) { _syncStatus.emit("Installation failed: Root required"); return@launch }
+            if (!_dashboardState.value.hasRoot) {
+                _syncStatus.emit("Installation failed: Root required")
+                return@launch
+            }
             withContext(Dispatchers.IO) {
                 try {
-                    _syncStatus.emit("Installing... Root permission may be required.")
-                    val assetManager = context.assets; val moduleDir = "/data/adb/modules/sentry_radio_hardening"
-                    RootRepository.execute("mkdir -p $moduleDir/common"); RootRepository.execute("mkdir -p $moduleDir/system/bin")
-                    listOf("module.prop", "system.prop", "common/service.sh", "system/bin/sentry-ctl").forEach { path ->
-                        assetManager.open("sentry_module/$path").use { input -> 
-                            val content = input.bufferedReader().readText()
-                            RootRepository.execute("echo '${content.replace("'", "'\\''")}' > $moduleDir/$path") 
+                    _syncStatus.emit("Installing module files... Root permission may be required.")
+                    val assetManager = context.assets
+                    val moduleDir = "/data/adb/modules/sentry_radio_hardening"
+
+                    // Copy the complete asset tree. The chipset detector and both vendor
+                    // backends are nested assets; copying only sentry-ctl leaves the
+                    // dispatcher unusable and can silently break Qualcomm/MediaTek routing.
+                    suspend fun copyAssetTree(assetPath: String, destinationPath: String) {
+                        val children = assetManager.list(assetPath).orEmpty()
+                        if (children.isNotEmpty()) {
+                            val mkdir = RootRepository.execute("mkdir -p '$destinationPath'")
+                            check(mkdir.success) {
+                                "Could not create module directory for $assetPath: ${mkdir.error}"
+                            }
+                            children.forEach { child ->
+                                copyAssetTree("$assetPath/$child", "$destinationPath/$child")
+                            }
+                        } else {
+                            val bytes = assetManager.open(assetPath).use { it.readBytes() }
+                            val encoded = android.util.Base64.encodeToString(
+                                bytes,
+                                android.util.Base64.NO_WRAP
+                            )
+                            val parent = destinationPath.substringBeforeLast('/')
+                            val mode = if (
+                                assetPath.endsWith(".sh") ||
+                                assetPath.contains("/system/bin/")
+                            ) "0755" else "0644"
+                            val command = "mkdir -p '$parent' && " +
+                                "printf '%s' '$encoded' | base64 -d > '$destinationPath' && " +
+                                "chmod $mode '$destinationPath'"
+                            val result = RootRepository.execute(command)
+                            check(result.success) {
+                                "Could not install $assetPath: ${result.error}"
+                            }
                         }
                     }
-                    RootRepository.execute("chmod 0644 $moduleDir/*.prop"); RootRepository.execute("chmod 0755 $moduleDir/common/*.sh"); RootRepository.execute("chmod 0755 $moduleDir/system/bin/*")
-                    _syncStatus.emit("Installation successful! Reboot required."); checkSystemStatus()
-                } catch (e: Exception) { _syncStatus.emit("Error installing module: ${e.message}") }
+
+                    copyAssetTree("sentry_module", moduleDir)
+                    val profile = RootRepository.detectChipsetProfile()
+                    val family = profile.backendName
+                    _syncStatus.emit(
+                        "Module files installed. Detected chipset: $family. " +
+                            "Review backend support before enabling the module; reboot required."
+                    )
+                    checkSystemStatus()
+                } catch (e: Exception) {
+                    Log.e("ForensicViewModel", "Module installation failed", e)
+                    _syncStatus.emit("Error installing module: ${e.message}")
+                }
             }
         }
     }
