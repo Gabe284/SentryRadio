@@ -115,6 +115,7 @@ data class DashboardState(
     val hasRoot: Boolean = false,
     val isXposedActive: Boolean = false,
     val isHardeningModuleInstalled: Boolean = false,
+    val isHardeningModuleStateUnknown: Boolean = false,
     val isHardeningModuleActive: Boolean = false,
     val activeSimSlot: Int = 0,
     val vulnerabilities: List<CveEntry> = emptyList(),
@@ -640,8 +641,11 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
             val hasRoot = RootRepository.isRootAvailable()
             val isModuleInstalled = hasRoot &&
                 RootRepository.isSentryModuleInstalled()
-            val isModuleEnabled = hasRoot &&
+            val globalDisableMarker = hasRoot &&
+                RootRepository.hasGlobalModuleDisableMarker()
+            val isModuleEnabled = hasRoot && !globalDisableMarker &&
                 RootRepository.isSentryModuleEnabled()
+            val isModuleStateUnknown = isModuleInstalled && globalDisableMarker
             val isXposed = isXposedModuleActive()
 
             // Update checks use installation state; control execution uses enabled state.
@@ -651,6 +655,7 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
                 it.copy(
                     hasRoot = hasRoot,
                     isHardeningModuleInstalled = isModuleInstalled,
+                    isHardeningModuleStateUnknown = isModuleStateUnknown,
                     isHardeningModuleActive = isModuleEnabled,
                     isXposedActive = isXposed,
                     moduleUpdateAvailable = moduleUpdateInfo.updateAvailable,
