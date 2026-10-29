@@ -47,19 +47,22 @@ data class ChipsetProfile(
             val hw = hardware.lowercase(Locale.ROOT)
             val bb = baseband.lowercase(Locale.ROOT)
 
+            val mtkPlatform = plat.startsWith("mt") &&
+                Regex("^mt[0-9]").containsMatchIn(plat)
+            val qcomPlatform = plat.startsWith("qcom") || plat.startsWith("msm") ||
+                Regex("^sm[0-9]").containsMatchIn(plat)
+            val mtkBaseband = Regex("mt[0-9]").containsMatchIn(bb)
+            val qcomIdentity = bb.contains("snapdragon") || bb.contains("qualcomm") ||
+                hw.contains("qcom")
+
             val isMtk = (
                 (mfr.contains("mtk") || mfr.contains("mediatek")) &&
-                    (plat.startsWith("mt") || bb.contains("mt"))
-                ) || (plat.startsWith("mt") && bb.contains("mt"))
+                    (mtkPlatform || mtkBaseband)
+                ) || (mtkPlatform && mtkBaseband)
             val isQualcomm = (
                 (mfr.contains("qualcomm") || mfr.contains("qcom")) &&
-                    (plat.isNotBlank() || bb.isNotBlank() || hw.isNotBlank())
-                ) || (
-                    (plat.startsWith("qcom") || plat.startsWith("msm") ||
-                        Regex("^sm[0-9]").containsMatchIn(plat) || hw.contains("qcom")) &&
-                        (mfr.contains("qualcomm") || bb.contains("snapdragon") ||
-                            bb.contains("qualcomm") || hw.contains("qcom"))
-                    )
+                    (qcomPlatform || qcomIdentity)
+                ) || (qcomPlatform && qcomIdentity)
 
             return when {
                 isMtk && !isQualcomm -> ChipsetProfile(
