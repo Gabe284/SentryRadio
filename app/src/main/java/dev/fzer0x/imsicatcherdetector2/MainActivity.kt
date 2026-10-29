@@ -697,7 +697,7 @@ fun SecurityScreen(viewModel: ForensicViewModel) {
                         Text("PANIC MODE", color = Color.Red, fontSize = 10.sp)
                     }
                     Button(
-                        onClick = { viewModel.recoverFromPanic() },
+                        onClick = { viewModel.resetWlan() },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1E)),
                         border = BorderStroke(1.dp, Color.Green)
