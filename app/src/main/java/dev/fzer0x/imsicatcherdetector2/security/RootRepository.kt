@@ -129,7 +129,8 @@ object RootRepository {
             Shell.cmd(
                 "[ -f '$SENTRY_MODULE_DIR/module.prop' ] && " +
                     "[ ! -e '$SENTRY_MODULE_DIR/disable' ] && " +
-                    "[ ! -e '$SENTRY_MODULE_DIR/remove' ]"
+                    "[ ! -e '$SENTRY_MODULE_DIR/remove' ] && " +
+                    "[ ! -e '/data/adb/modules/disable' ]"
             ).exec().isSuccess
         } catch (e: Exception) {
             Log.e(TAG, "Unable to determine Sentry module enabled state", e)
