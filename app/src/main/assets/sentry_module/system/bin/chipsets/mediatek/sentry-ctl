@@ -1,0 +1,144 @@
+#!/system/bin/sh
+# MediaTek backend for Sentry Radio; device-specific values are isolated here.
+# Device-specific radio controls remain unsupported until independently verified.
+# All commands are read-only except --forensic-dump, which writes diagnostic files.
+
+COMMAND="${1:-}"
+VALUE="${2:-}"
+
+prop() {
+    getprop "$1" 2>/dev/null
+}
+
+unsupported() {
+    echo "$1"
+    echo "No changes made."
+    exit 2
+}
+
+case "$COMMAND" in
+    --status)
+        echo "Sentry Radio Hardening v0.5.0-mtk1"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "SoC manufacturer: $(prop ro.hardware.soc.manufacturer)"
+        echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
+        echo "Root context: $(id -Z 2>/dev/null || echo unavailable)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem RFS service: $(prop init.svc.vendor.modem-rfs-sh)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "Hardening: NOT CLAIMED; no validated MTK SELinux policy is installed by this command."
+        echo "Firewall status: not assessed; this command makes no firewall changes."
+        ;;
+    --fingerprint)
+        echo "--- Device/baseband fingerprint (read-only) ---"
+        echo "Manufacturer: $(prop ro.hardware.soc.manufacturer)"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Model: $(prop ro.product.model)"
+        echo "Brand: $(prop ro.product.brand)"
+        echo "Build: $(prop ro.build.display.id)"
+        echo "Security patch: $(prop ro.build.version.security_patch)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "RIL implementation label: $(prop gsm.version.ril-impl)"
+        echo "Note: the RIL implementation label alone does not identify the vendor RIL implementation."
+        ;;
+    --telemetry)
+        echo "--- Radio telemetry (read-only; no cipher inference) ---"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Network/service fields exposed by Android:"
+        dumpsys telephony.registry 2>/dev/null | grep -iE 'mServiceState|mSignalStrength|mDataNetworkType|mVoiceNetworkType|nrState|CellIdentity|CellSignalStrength' | head -30
+        echo "Cipher algorithms, RSRP/SNR, and modem temperature are not inferred from missing fields."
+        ;;
+    --5g-info)
+        echo "--- Android/MediaTek 5G information (read-only) ---"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "Observed NR type property: $(prop vendor.ril.nr.type)"
+        echo "NR state/network fields exposed by Android:"
+        dumpsys telephony.registry 2>/dev/null | grep -iE 'nrState|nrFrequencyRange|displayInfo|mDataNetworkType|mServiceState' | head -20
+        echo "The NR type property is observational here; no network mode was changed."
+        ;;
+    --monitor-modem)
+        echo "--- MediaTek modem health snapshot (read-only) ---"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem RFS service: $(prop init.svc.vendor.modem-rfs-sh)"
+        echo "Dual-SIM mode observed: $(prop persist.vendor.radio.multisim.config)"
+        echo "MTK dual-SIM/DSBP support property (observed only): $(prop persist.vendor.radio.mtk_dsbp_support)"
+        echo "NR type property (observed only): $(prop vendor.ril.nr.type)"
+        echo "Subscriber identifiers, ICCID-derived values, and broad property dumps are intentionally omitted."
+        if [ "$VALUE" = "continuous" ]; then
+            echo "Continuous polling is unsupported until a validated MTK telemetry source is available."
+            exit 2
+        fi
+        ;;
+    --force-5g-sa|--force-5g-nsa)
+        unsupported "Unsupported on this MediaTek port: no verified MTK network-mode control interface."
+        ;;
+    --force-lte)
+        unsupported "Unsupported on this MediaTek port: network-mode indices and controls are not validated."
+        ;;
+    --block-2g)
+        unsupported "Unsupported on this MediaTek port: no verified control for disabling GSM was identified."
+        ;;
+    --reject-a50)
+        unsupported "Unsupported: no verified modem control for cipher rejection was identified."
+        ;;
+    --reset-radio)
+        unsupported "Disabled pending a reviewed MTK recovery procedure; radio reset behavior is not validated."
+        ;;
+    --panic|--panic-extended)
+        unsupported "Disabled pending a reviewed, tested emergency workflow."
+        ;;
+    --hard-shutdown)
+        unsupported "Disabled: guessed AT/TTY writes and Qualcomm sysfs paths are unsafe on this MediaTek device."
+        ;;
+    --recover)
+        unsupported "Disabled pending a verified recovery procedure; no network or firewall state will be reset blindly."
+        ;;
+    --geo-protect)
+        unsupported "Geo-protection is not implemented: no validated cell database or enforcement mechanism is connected."
+        ;;
+    --zero-day-protect)
+        unsupported "Zero-day protection is not implemented; properties and broadcasts do not patch firmware or sync CVE data."
+        ;;
+    --harden-sepolicy)
+        unsupported "No SELinux policy changes made. Collect relevant AVC denials and validate the required operation first."
+        ;;
+    --validate-panic)
+        echo "Read-only validation only; no network interfaces will be brought down."
+        echo "IPv4 DROP rules: $(iptables -S 2>/dev/null | grep -c -- '-j DROP')"
+        echo "IPv6 DROP rules: $(ip6tables -S 2>/dev/null | grep -c -- '-j DROP')"
+        echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        ;;
+    --forensic-dump)
+        echo "WARNING: this explicitly writes diagnostic files and may capture sensitive device/radio data."
+        echo "Review and protect the output before sharing it."
+        DUMP_DIR="/data/local/tmp/sentry_forensic_$(date +%Y%m%d_%H%M%S)"
+        if ! mkdir -p "$DUMP_DIR"; then
+            echo "Could not create diagnostic directory: $DUMP_DIR" >&2
+            exit 1
+        fi
+        dumpsys telephony.registry > "$DUMP_DIR/telephony_registry.txt" 2>&1
+        getprop | grep -Ei '^\[(vendor\.ril\.|vendor\.gsm\.ril\.|persist\.vendor\.radio\.)' \
+            | grep -Eiv 'iccid|subscriberid|imsi|imei|msisdn|phone.?number|serial' \
+            > "$DUMP_DIR/modem_properties_redacted.txt"
+        dumpsys radio > "$DUMP_DIR/radio_dump.txt" 2>&1
+        dmesg 2>/dev/null | grep -iE 'ril|modem|radio' > "$DUMP_DIR/kernel_logs.txt"
+        cat /proc/net/dev > "$DUMP_DIR/network_stats.txt"
+        chmod 600 "$DUMP_DIR"/*.txt 2>/dev/null
+        echo "Diagnostic files written to: $DUMP_DIR"
+        echo "Review all files for sensitive information before sharing."
+        ;;
+    *)
+        echo "Usage: sentry-ctl [--status|--fingerprint|--telemetry|--5g-info|--monitor-modem [continuous]|--force-5g-sa|--force-5g-nsa|--force-lte|--block-2g|--reject-a50|--reset-radio|--panic|--panic-extended|--hard-shutdown|--recover|--geo-protect|--zero-day-protect|--harden-sepolicy|--validate-panic|--forensic-dump]"
+        exit 2
+        ;;
+esac
