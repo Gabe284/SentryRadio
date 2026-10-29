@@ -3,6 +3,7 @@ package dev.fzer0x.imsicatcherdetector2.ui.viewmodel
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -36,6 +37,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.io.File
+import java.security.GeneralSecurityException
+import java.security.KeyStore
 
 data class UserSettings(
     val updateRate: Int = 15,
@@ -134,17 +137,56 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
     private val forensicDao = ForensicDatabase.getDatabase(application).forensicDao()
     private val vulnerabilityManager = VulnerabilityManager(application)
     
-    private val masterKey = MasterKey.Builder(application)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    private val encryptedPrefs = createEncryptedPreferences(application)
 
-    private val encryptedPrefs = EncryptedSharedPreferences.create(
-        application,
-        "sentry_secure_settings",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    /**
+     * Open encrypted settings normally. If the stored keyset cannot be authenticated,
+     * remove only this app's encrypted-settings file and AndroidX default master key,
+     * then recreate them. This avoids crashing the entire ViewModel on a stale keyset.
+     * API keys in this encrypted store may need to be entered again after recovery.
+     */
+    private fun createEncryptedPreferences(application: Application): SharedPreferences {
+        val preferencesName = "sentry_secure_settings"
+
+        fun create() = EncryptedSharedPreferences.create(
+            application,
+            preferencesName,
+            MasterKey.Builder(application)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+
+        return try {
+            create()
+        } catch (e: GeneralSecurityException) {
+            Log.e(
+                "SentryRadio",
+                "Cannot authenticate encrypted settings; resetting the encrypted settings store. Saved API keys may need to be entered again.",
+                e
+            )
+
+            try {
+                application.deleteSharedPreferences(preferencesName)
+            } catch (deleteError: Exception) {
+                Log.w("SentryRadio", "Could not delete the unreadable encrypted settings file", deleteError)
+            }
+
+            try {
+                val keyStore = KeyStore.getInstance("AndroidKeyStore")
+                keyStore.load(null)
+                if (keyStore.containsAlias(MasterKey.DEFAULT_MASTER_KEY_ALIAS)) {
+                    keyStore.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+                }
+            } catch (keyStoreError: Exception) {
+                Log.w("SentryRadio", "Could not reset the AndroidX master key", keyStoreError)
+            }
+
+            // Retry once with a freshly generated key and an empty encrypted store.
+            create()
+        }
+    }
 
     private val prefs = application.getSharedPreferences("sentry_settings", Context.MODE_PRIVATE)
 
