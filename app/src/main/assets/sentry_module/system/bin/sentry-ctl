@@ -235,54 +235,11 @@ case $COMMAND in
               exit 2
           fi
           ;;
-    "--geo-protect")
-        echo "--- Geo-Fencing Protection ---"
-        if [ "$VALUE" == "enable" ]; then
-            echo "Enabling geo-fencing protection..."
-            setprop persist.sentry.geo_protect 1
-            # Create whitelist of known cell IDs from app database
-            echo "Creating cell ID whitelist..."
-            # Import known cell IDs from app's database
-            if [ -f "/data/data/dev.fzer0x.imsicatcherdetector2/databases/forensic.db" ]; then
-                echo "Importing known cell IDs from app database..."
-                # This would be implemented with proper SQLite access
-                echo "Whitelist creation completed"
-            else
-                echo "App database not found - using current cell as baseline"
-                CURRENT_CELL=$(dumpsys telephony.registry | grep -i "cellid" | head -1 | grep -o '[0-9]\+')
-                echo "Baseline Cell ID: $CURRENT_CELL"
-            fi
-            am broadcast -a dev.fzer0x.sentry.GEO_PROTECT --ez enabled true --ei status 1
-        elif [ "$VALUE" == "disable" ]; then
-            echo "Disabling geo-fencing protection..."
-            setprop persist.sentry.geo_protect 0
-            am broadcast -a dev.fzer0x.sentry.GEO_PROTECT --ez enabled false --ei status 0
-        elif [ "$VALUE" == "status" ]; then
-            echo "Geo-Fencing Status: $(getprop persist.sentry.geo_protect)"
-            echo "Current Cell ID: $(dumpsys telephony.registry | grep -i "cellid" | head -1 | grep -o '[0-9]\+' || echo 'Unknown')"
-            echo "Whitelisted Cells: $(getprop persist.sentry.geo_whitelist_count || echo '0')"
-            echo "Blocked Attempts: $(getprop persist.sentry.geo_blocked_count || echo '0')"
-        elif [ "$VALUE" == "add-cell" ]; then
-            # Add current cell to whitelist
-            CURRENT_CELL=$(dumpsys telephony.registry | grep -i "cellid" | head -1 | grep -o '[0-9]\+')
-            if [ -n "$CURRENT_CELL" ]; then
-                echo "Adding Cell ID $CURRENT_CELL to whitelist..."
-                # Append to whitelist property
-                CURRENT_WHITELIST=$(getprop persist.sentry.geo_whitelist | tr ',' ' ')
-                if echo "$CURRENT_WHITELIST" | grep -q "$CURRENT_CELL"; then
-                    echo "Cell ID already whitelisted"
-                else
-                    NEW_WHITELIST="${CURRENT_WHITELIST:+$CURRENT_WHITELIST,}$CURRENT_CELL"
-                    setprop persist.sentry.geo_whitelist "$NEW_WHITELIST"
-                    echo "Cell ID added to whitelist"
-                fi
-            else
-                echo "Could not determine current Cell ID"
-            fi
-        else
-            echo "Usage: sentry-ctl --geo-protect [enable|disable|status|add-cell]"
-        fi
-        ;;
+      "--geo-protect")
+          echo "Geo-protection is not implemented: no validated cell database or enforcement mechanism is connected."
+          echo "No protection state was changed. Use Android location/telephony APIs and an explicit, tested policy before enabling this feature."
+          exit 2
+          ;;
     "--forensic-dump")
         echo "--- Advanced Forensic Data Dump ---"
         DUMP_DIR="/data/local/tmp/sentry_forensic_$(date +%Y%m%d_%H%M%S)"
@@ -306,66 +263,11 @@ case $COMMAND in
         echo "Forensic dump completed: $DUMP_DIR"
         echo "Files created: $(ls -la "$DUMP_DIR" | wc -l)"
         ;;
-    "--zero-day-protect")
-        echo "--- Zero-Day Protection System ---"
-        if [ "$VALUE" == "enable" ]; then
-            echo "Enabling zero-day protection..."
-            setprop persist.sentry.zero_day_protect 1
-            # Enable dynamic vulnerability response
-            setprop persist.vendor.radio.dynamic_patch 1
-            setprop persist.vendor.radio.validate_commands 1
-            # Enable emergency configuration updates
-            setprop persist.sentry.emergency_updates 1
-            # Set up automatic CVE sync interval (every 6 hours)
-            setprop persist.sentry.cve_sync_interval 21600
-            setprop persist.sentry.last_cve_sync $(date +%s)
-            am broadcast -a dev.fzer0x.sentry.ZERO_DAY --ez enabled true --ei status 1
-            echo "Zero-Day protection enabled with automatic CVE sync"
-        elif [ "$VALUE" == "disable" ]; then
-            echo "Disabling zero-day protection..."
-            setprop persist.sentry.zero_day_protect 0
-            setprop persist.vendor.radio.dynamic_patch 0
-            setprop persist.vendor.radio.validate_commands 0
-            setprop persist.sentry.emergency_updates 0
-            am broadcast -a dev.fzer0x.sentry.ZERO_DAY --ez enabled false --ei status 0
-            echo "Zero-Day protection disabled"
-        elif [ "$VALUE" == "sync" ]; then
-            echo "Syncing CVE database..."
-            setprop persist.sentry.last_cve_sync $(date +%s)
-            am broadcast -a dev.fzer0x.sentry.CVE_SYNC --ez force_sync true
-            echo "CVE sync initiated"
-        elif [ "$VALUE" == "validate" ]; then
-            echo "Validating zero-day protection status..."
-            PROTECTION_STATUS=$(getprop persist.sentry.zero_day_protect)
-            DYNAMIC_PATCH=$(getprop persist.vendor.radio.dynamic_patch)
-            COMMAND_VALIDATION=$(getprop persist.vendor.radio.validate_commands)
-            LAST_SYNC=$(getprop persist.sentry.last_cve_sync)
-            SYNC_INTERVAL=$(getprop persist.sentry.cve_sync_interval)
-
-            echo "Protection Status: $PROTECTION_STATUS"
-            echo "Dynamic Patching: $DYNAMIC_PATCH"
-            echo "Command Validation: $COMMAND_VALIDATION"
-            echo "Last CVE Sync: $LAST_SYNC ($(date -d @$LAST_SYNC 2>/dev/null || echo 'Invalid timestamp'))"
-            echo "Sync Interval: ${SYNC_INTERVAL}s ($(echo "$SYNC_INTERVAL/3600" | bc)h)"
-
-            # Check if sync is needed
-            CURRENT_TIME=$(date +%s)
-            TIME_SINCE_SYNC=$((CURRENT_TIME - LAST_SYNC))
-            if [ $TIME_SINCE_SYNC -gt $SYNC_INTERVAL ]; then
-                echo "WARNING: CVE sync is overdue by $(echo "$TIME_SINCE_SYNC-$SYNC_INTERVAL" | bc)s"
-            else
-                echo "CVE database is up to date"
-            fi
-        elif [ "$VALUE" == "status" ]; then
-            echo "Zero-Day Protection: $(getprop persist.sentry.zero_day_protect)"
-            echo "Dynamic Patching: $(getprop persist.vendor.radio.dynamic_patch)"
-            echo "Command Validation: $(getprop persist.vendor.radio.validate_commands)"
-            echo "Last CVE Sync: $(getprop persist.sentry.last_cve_sync)"
-            echo "Emergency Updates: $(getprop persist.sentry.emergency_updates)"
-        else
-            echo "Usage: sentry-ctl --zero-day-protect [enable|disable|sync|validate|status]"
-        fi
-        ;;
+      "--zero-day-protect")
+          echo "Zero-day protection is not implemented: setting properties or broadcasting intents does not patch firmware or sync a CVE database."
+          echo "No protection state was changed."
+          exit 2
+          ;;
       "--hard-shutdown")
           echo "Disabled: guessed AT/TTY writes and Qualcomm sysfs paths are unsafe on this MediaTek device. No changes made."
           exit 2
