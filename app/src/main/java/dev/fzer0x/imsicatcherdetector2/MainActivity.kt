@@ -664,7 +664,8 @@ fun SecurityScreen(viewModel: ForensicViewModel) {
                         DetailRow(
                             "Modem Hardening",
                             when {
-                                dashboardState.isHardeningModuleActive -> "Enabled"
+                                dashboardState.isHardeningModuleActive -> "Enabled (runtime unverified)"
+                                dashboardState.isHardeningModuleStateUnknown -> "Activation uncertain (global marker)"
                                 dashboardState.isHardeningModuleInstalled -> "Installed, but disabled"
                                 else -> "Not installed"
                             }
@@ -1082,7 +1083,11 @@ fun SettingsScreen(viewModel: ForensicViewModel) {
                         }
                     } else if (dashboardState.isHardeningModuleInstalled) {
                         Text(
-                            "Module files are installed but the module is disabled in KernelSU/Magisk. Enable it in the manager only after reviewing device-specific support; the MediaTek port remains passive.",
+                            if (dashboardState.isHardeningModuleStateUnknown) {
+                                "A device-wide module-disable marker exists. Its effect depends on the root manager, so activation cannot be confirmed; Sentry control commands are blocked until the state is clear."
+                            } else {
+                                "Module files are installed but the module is disabled in KernelSU/Magisk. Enable it in the manager only after reviewing device-specific support; the MediaTek port remains passive."
+                            },
                             color = Color.Yellow.copy(alpha = 0.8f),
                             fontSize = 11.sp
                         )
