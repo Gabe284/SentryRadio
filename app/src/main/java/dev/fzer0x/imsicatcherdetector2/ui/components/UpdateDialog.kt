@@ -148,14 +148,14 @@ fun UpdateDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 Text(
-                    "https://github.com/fzer0x/SentryRadio",
+                    "https://github.com/Gabe284/SentryRadio",
 
                     color = Color.Cyan,
                     fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "⚠\uFE0F Make sure it's the Official Repository ⚠\uFE0F",
+                    "Use the SentryRadio fork release page for this build.",
 
                     color = Color.Red,
                     fontSize = 13.sp,
@@ -187,7 +187,7 @@ fun UpdateDialog(
                         onClick = {
                             val intent = Intent(
                                 Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/fzer0x/SentryRadio/releases")
+                                Uri.parse("https://github.com/Gabe284/SentryRadio/releases")
                             ).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
