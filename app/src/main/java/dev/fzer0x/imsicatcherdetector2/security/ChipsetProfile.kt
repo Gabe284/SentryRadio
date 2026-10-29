@@ -61,7 +61,6 @@ data class ChipsetProfile(
                             bb.contains("qualcomm") || hw.contains("qcom"))
                     )
 
-            val common = arrayOf(manufacturer, platform, hardware, baseband, ril)
             return when {
                 isMtk && !isQualcomm -> ChipsetProfile(
                     family = ChipsetFamily.MEDIATEK,
