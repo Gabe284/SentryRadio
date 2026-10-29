@@ -976,11 +976,23 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     copyAssetTree("sentry_module", moduleDir)
+
+                    // Installing files under /data/adb/modules can activate a module
+                    // at the next boot unless the disable marker exists. Keep this
+                    // device-specific port opt-in: install the files, but leave it disabled.
+                    val disableMarker = RootRepository.execute(
+                        "touch '$moduleDir/disable' && chmod 0644 '$moduleDir/disable'"
+                    )
+                    check(disableMarker.success) {
+                        "Module files were copied, but the disable marker could not be created. " +
+                            "Do not reboot until the module is manually disabled."
+                    }
+
                     val profile = RootRepository.detectChipsetProfile()
                     val family = profile.backendName
                     _syncStatus.emit(
-                        "Module files installed. Detected chipset: $family. " +
-                            "Review backend support before enabling the module; reboot required."
+                        "Module files installed and left DISABLED. Detected chipset: $family. " +
+                            "Review device compatibility before manually enabling it."
                     )
                     checkSystemStatus()
                 } catch (e: Exception) {
@@ -1271,14 +1283,19 @@ fun triggerForensicDump() {
             }
         }
     }
-    fun syncCveDatabase() { viewModelScope.launch { if (_dashboardState.value.hasRoot && _dashboardState.value.isHardeningModuleActive) { 
-        RootRepository.execute("sentry-ctl --zero-day-protect sync")
-        _syncStatus.emit("CVE database sync initiated")
-        
-        // Update the last CVE sync time immediately and persist it
+    fun syncCveDatabase() { viewModelScope.launch { if (_dashboardState.value.hasRoot && _dashboardState.value.isHardeningModuleActive) {
+        val result = RootRepository.execute("sentry-ctl --zero-day-protect sync")
+        if (!result.success) {
+            val detail = listOf(result.output, result.error).filter { it.isNotBlank() }.joinToString("\n")
+            _syncStatus.emit("CVE database sync is unsupported or failed: $detail")
+            return@launch
+        }
+        _syncStatus.emit("CVE database sync command completed: ${result.output}")
+
+        // Persist a timestamp only after the backend reports success.
         val currentTime = System.currentTimeMillis()
         val currentTimeStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(currentTime))
-        
+
         // Save to persistent storage
         prefs.edit { putLong("last_cve_sync_manual", currentTime) }
         
