@@ -1,295 +1,144 @@
 #!/system/bin/sh
-# Sentry Radio Hardening - Advanced Snapdragon Telemetry v0.5.0 (Stealth & Hardening Edition)
+# Sentry Radio Hardening - conservative MediaTek control/diagnostic CLI
+# Device-specific radio controls remain unsupported until independently verified.
+# All commands are read-only except --forensic-dump, which writes diagnostic files.
 
-COMMAND=$1
-VALUE=$2
+COMMAND="${1:-}"
+VALUE="${2:-}"
 
-# Performance optimization: Enhanced caching with compression
-CACHE_DIR="/data/local/tmp/sentry_cache"
-CACHE_TTL=300 # 5 minutes
-MAX_CACHE_SIZE=1000
-PERFORMANCE_LOG="/data/local/tmp/sentry_performance.log"
-mkdir -p "$CACHE_DIR"
-
-# Performance metrics
-CACHE_HITS=0
-CACHE_MISSES=0
-TOTAL_OPERATIONS=0
-
-cache_get() {
-    local key="$1"
-    local cache_file="$CACHE_DIR/${key}.cache"
-    local meta_file="$CACHE_DIR/${key}.meta"
-
-    if [ -f "$cache_file" ] && [ -f "$meta_file" ]; then
-        local file_age=$(($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)))
-        if [ $file_age -lt $CACHE_TTL ]; then
-            # Read metadata for access tracking
-            local access_count=$(cat "$meta_file" 2>/dev/null | cut -d: -f1 || echo "0")
-            local last_access=$(cat "$meta_file" 2>/dev/null | cut -d: -f2 || echo "$(date +%s)")
-
-            # Update access statistics
-            echo "$((access_count + 1)):$(date +%s)" > "$meta_file"
-
-            CACHE_HITS=$((CACHE_HITS + 1))
-            cat "$cache_file" 2>/dev/null
-            return 0
-        else
-            # Remove expired cache files
-            rm -f "$cache_file" "$meta_file"
-        fi
-    fi
-
-    CACHE_MISSES=$((CACHE_MISSES + 1))
-    return 1
+prop() {
+    getprop "$1" 2>/dev/null
 }
 
-cache_set() {
-    local key="$1"
-    local value="$2"
-    local cache_file="$CACHE_DIR/${key}.cache"
-    local meta_file="$CACHE_DIR/${key}.meta"
-
-    # Check cache size limit
-    local current_size=$(find "$CACHE_DIR" -name "*.cache" | wc -l)
-    if [ $current_size -ge $MAX_CACHE_SIZE ]; then
-        cache_cleanup
-    fi
-
-    echo "$value" > "$cache_file"
-    echo "1:$(date +%s)" > "$meta_file"
-    chmod 600 "$cache_file" "$meta_file"
-}
-
-# Intelligent cache cleanup with LRU+LFU eviction
-cache_cleanup() {
-    local now=$(date +%s)
-
-    # Create temporary file with cache entries and their scores
-    find "$CACHE_DIR" -name "*.meta" -exec sh -c '
-        meta_file="$1"
-        key=$(basename "$meta_file" .meta)
-        cache_file="'$CACHE_DIR'/${key}.cache"
-        if [ -f "$cache_file" ]; then
-            file_age=$(('$now' - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)))
-            access_count=$(cat "$meta_file" 2>/dev/null | cut -d: -f1 || echo "0")
-            last_access=$(cat "$meta_file" 2>/dev/null | cut -d: -f2 || echo "0")
-            # Calculate score: lower score = higher priority for removal
-            score=$((file_age / 10 - access_count * 2 + ('$now' - last_access) / 20))
-            echo "$score:$key"
-        fi
-    ' sh {} \; | sort -n | head -n $((MAX_CACHE_SIZE / 10)) | cut -d: -f2 > /tmp/cache_cleanup.tmp
-
-    # Remove least useful entries
-    while IFS= read -r key; do
-        rm -f "$CACHE_DIR/${key}.cache" "$CACHE_DIR/${key}.meta"
-    done < /tmp/cache_cleanup.tmp
-
-    rm -f /tmp/cache_cleanup.tmp
-    log_action "Cache cleanup completed"
-}
-
-# Performance logging
-log_performance() {
-    TOTAL_OPERATIONS=$((TOTAL_OPERATIONS + 1))
-    if [ $((TOTAL_OPERATIONS % 100)) -eq 0 ]; then
-        local hit_rate=0
-        if [ $((CACHE_HITS + CACHE_MISSES)) -gt 0 ]; then
-            hit_rate=$((CACHE_HITS * 100 / (CACHE_HITS + CACHE_MISSES)))
-        fi
-        echo "$(date): Cache stats - Hits: $CACHE_HITS, Misses: $CACHE_MISSES, Hit rate: ${hit_rate}%" >> "$PERFORMANCE_LOG"
-    fi
-}
-
-log_action() {
-    log -t SentryHardening "CLI: $1"
+unsupported() {
     echo "$1"
-    log_performance
+    echo "No changes made."
+    exit 2
 }
 
-# eBPF Firewall Implementation (using cBPF bytecode for xt_bpf)
-apply_ebpf_firewall() {
-    log_action "Applying eBPF-based deep network filtering..."
-    # "ret 1" bytecode for BPF: Match everything (1 instruction: 6 0 0 1)
-    # This is used with -j DROP to drop everything at the kernel level
-    local BPF_MATCH_ALL="1,6 0 0 1"
-
-    # Try to use xt_bpf if supported
-    if iptables -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null; then
-        log_action "eBPF (cBPF) INPUT filter applied"
-    else
-        log_action "xt_bpf not supported, falling back to standard drop"
-        iptables -P INPUT DROP 2>/dev/null
-    fi
-
-    if iptables -A OUTPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null; then
-        log_action "eBPF (cBPF) OUTPUT filter applied"
-    else
-        iptables -P OUTPUT DROP 2>/dev/null
-    fi
-
-    # Repeat for IPv6
-    ip6tables -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null || ip6tables -P INPUT DROP 2>/dev/null
-    ip6tables -A OUTPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null || ip6tables -P OUTPUT DROP 2>/dev/null
-}
-
-remove_ebpf_firewall() {
-    log_action "Removing eBPF-based deep network filtering..."
-    local BPF_MATCH_ALL="1,6 0 0 1"
-    iptables -D INPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null
-    iptables -D OUTPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null
-    ip6tables -D INPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null
-    ip6tables -D OUTPUT -m bpf --bytecode "$BPF_MATCH_ALL" -j DROP 2>/dev/null
-
-    iptables -P INPUT ACCEPT 2>/dev/null
-    iptables -P OUTPUT ACCEPT 2>/dev/null
-    ip6tables -P INPUT ACCEPT 2>/dev/null
-    ip6tables -P OUTPUT ACCEPT 2>/dev/null
-}
-
-case $COMMAND in
-      "--force-5g-sa")
-          echo "Unsupported on this MediaTek port: no verified MTK control interface; no changes made."
-          exit 2
-          ;;
-      "--force-5g-nsa")
-          echo "Unsupported on this MediaTek port: no verified MTK control interface; no changes made."
-          exit 2
-          ;;
-      "--5g-info")
-          echo "--- Android/MediaTek 5G information (read-only) ---"
-          echo "Platform: $(getprop ro.board.platform)"
-          echo "Baseband: $(getprop vendor.ril.gsm.version.baseband)"
-          echo "Modem status: $(getprop vendor.ril.md_status_from_ccci)"
-          echo "NR type property: $(getprop vendor.ril.nr.type)"
-          echo "NR state/network fields exposed by Android:"
-          dumpsys telephony.registry 2>/dev/null | grep -iE 'nrState|nrFrequencyRange|displayInfo|mDataNetworkType|mServiceState' | head -20
-          echo "Note: missing fields mean Android did not expose them in this dump; no radio settings changed."
-          ;;
-      "--force-lte")
-          echo "Unsupported on this MediaTek port: network-mode indices and controls are not validated; no changes made."
-          exit 2
-          ;;
-      "--reset-radio")
-          echo "Disabled pending MediaTek validation. This command previously changed firewall policies, properties, and telephony state."
-          exit 2
-          ;;
-      "--panic")
-          echo "Disabled pending a reviewed, tested emergency workflow. No services, files, radio settings, or firewall rules changed."
-          exit 2
-          ;;
-      "--panic-extended")
-          echo "Disabled pending a reviewed, tested emergency workflow. No services, files, radio settings, or firewall rules changed."
-          exit 2
-          ;;
-      "--block-2g")
-          echo "Unsupported on this MediaTek port: property is not verified to control GSM. No changes made."
-          exit 2
-          ;;
-      "--reject-a50")
-          echo "Unsupported on this MediaTek port: cipher-rejection control is not verified. No changes made."
-          exit 2
-          ;;
-      "--telemetry")
-          echo "--- Radio telemetry (read-only; no cipher inference) ---"
-          echo "Platform: $(getprop ro.board.platform)"
-          echo "Baseband: $(getprop vendor.ril.gsm.version.baseband)"
-          echo "Modem status: $(getprop vendor.ril.md_status_from_ccci)"
-          echo "RIL service: $(getprop init.svc.vendor.ril-daemon-mtk)"
-          echo "Network/service fields exposed by Android:"
-          dumpsys telephony.registry 2>/dev/null | grep -iE 'mServiceState|mSignalStrength|mDataNetworkType|mVoiceNetworkType|nrState|CellIdentity|CellSignalStrength' | head -30
-          echo "Cipher algorithm, RSRP/SNR, and modem temperature are not reported unless the device exposes verified fields."
-          ;;
-      "--fingerprint")
-          echo "--- Device / baseband fingerprint (read-only) ---"
-          echo "Manufacturer: $(getprop ro.hardware.soc.manufacturer)"
-          echo "Platform: $(getprop ro.board.platform)"
-          echo "Model: $(getprop ro.product.model)"
-          echo "Brand: $(getprop ro.product.brand)"
-          echo "Build: $(getprop ro.build.display.id)"
-          echo "Security patch: $(getprop ro.build.version.security_patch)"
-          echo "Baseband: $(getprop vendor.ril.gsm.version.baseband)"
-          echo "RIL implementation: $(getprop gsm.version.ril-impl)"
-          ;;
-      "--status")
-          echo "Sentry Radio Hardening v0.5.0-mtk1"
-          echo "Platform: $(getprop ro.board.platform)"
-          echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
-          echo "Root context: $(id -Z 2>/dev/null || echo unavailable)"
-          echo "MTK RIL service: $(getprop init.svc.vendor.ril-daemon-mtk)"
-          echo "Modem status: $(getprop vendor.ril.md_status_from_ccci)"
-          echo "Hardening: NOT CLAIMED; no validated MTK SELinux policy is installed by this command."
-          echo "Firewall status: not assessed (no firewall changes made)."
-          ;;
-      "--monitor-modem")
-          echo "--- MediaTek modem status (read-only snapshot) ---"
-          echo "Baseband: $(getprop vendor.ril.gsm.version.baseband)"
-          echo "Modem status: $(getprop vendor.ril.md_status_from_ccci)"
-          echo "MTK RIL service: $(getprop init.svc.vendor.ril-daemon-mtk)"
-          echo "Modem RFS service: $(getprop init.svc.vendor.modem-rfs-sh)"
-          echo "Platform: $(getprop ro.board.platform)"
-          echo "Relevant vendor properties:"
-          getprop | grep -E '^\[(vendor\.ril\.|vendor\.gsm\.ril\.|persist\.vendor\.radio\.)' | head -40
-          if [ "$VALUE" = "continuous" ]; then
-              echo "Continuous polling is intentionally omitted until a supported MTK telemetry source is validated."
-              exit 2
-          fi
-          ;;
-      "--geo-protect")
-          echo "Geo-protection is not implemented: no validated cell database or enforcement mechanism is connected."
-          echo "No protection state was changed. Use Android location/telephony APIs and an explicit, tested policy before enabling this feature."
-          exit 2
-          ;;
-    "--forensic-dump")
-        echo "--- Advanced Forensic Data Dump ---"
-        DUMP_DIR="/data/local/tmp/sentry_forensic_$(date +%Y%m%d_%H%M%S)"
-        mkdir -p "$DUMP_DIR"
-
-        echo "Collecting RIL Message Timeline..."
-        dumpsys telephony.registry > "$DUMP_DIR/telephony_registry.txt"
-
-        echo "Collecting Baseband Register States..."
-        getprop | grep -E "ril\.|radio\.|modem\." > "$DUMP_DIR/modem_properties.txt"
-
-        echo "Collecting Radio Frequency Analysis..."
-        dumpsys radio > "$DUMP_DIR/radio_dump.txt"
-
-        echo "Collecting Protocol Stack Traces..."
-        dmesg | grep -i "ril\|modem\|radio" > "$DUMP_DIR/kernel_logs.txt"
-
-        echo "Collecting Network Statistics..."
-        cat /proc/net/dev > "$DUMP_DIR/network_stats.txt"
-
-        echo "Forensic dump completed: $DUMP_DIR"
-        echo "Files created: $(ls -la "$DUMP_DIR" | wc -l)"
+case "$COMMAND" in
+    --status)
+        echo "Sentry Radio Hardening v0.5.0-mtk1"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "SoC manufacturer: $(prop ro.hardware.soc.manufacturer)"
+        echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
+        echo "Root context: $(id -Z 2>/dev/null || echo unavailable)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem RFS service: $(prop init.svc.vendor.modem-rfs-sh)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "Hardening: NOT CLAIMED; no validated MTK SELinux policy is installed by this command."
+        echo "Firewall status: not assessed; this command makes no firewall changes."
         ;;
-      "--zero-day-protect")
-          echo "Zero-day protection is not implemented: setting properties or broadcasting intents does not patch firmware or sync a CVE database."
-          echo "No protection state was changed."
-          exit 2
-          ;;
-      "--hard-shutdown")
-          echo "Disabled: guessed AT/TTY writes and Qualcomm sysfs paths are unsafe on this MediaTek device. No changes made."
-          exit 2
-          ;;
-      "--recover")
-          echo "Disabled pending a verified recovery procedure. This command must not reset network/firewall state blindly."
-          exit 2
-          ;;
-      "--validate-panic")
-          echo "Read-only validation only; no network interfaces will be brought down."
-          echo "Active DROP rules (iptables): $(iptables -S 2>/dev/null | grep -c -- '-j DROP')"
-          echo "Active DROP rules (ip6tables): $(ip6tables -S 2>/dev/null | grep -c -- '-j DROP')"
-          echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
-          echo "MTK RIL service: $(getprop init.svc.vendor.ril-daemon-mtk)"
-          echo "Modem status: $(getprop vendor.ril.md_status_from_ccci)"
-          ;;
-      "--harden-sepolicy")
-          echo "No policy changes made. Device labels show MediaTek types such as ccci_device and ccci_mdmonitor_device."
-          echo "Collect AVC denials from logcat while reproducing a harmless operation before adding narrowly scoped rules."
-          exit 2
-          ;;
+    --fingerprint)
+        echo "--- Device/baseband fingerprint (read-only) ---"
+        echo "Manufacturer: $(prop ro.hardware.soc.manufacturer)"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Model: $(prop ro.product.model)"
+        echo "Brand: $(prop ro.product.brand)"
+        echo "Build: $(prop ro.build.display.id)"
+        echo "Security patch: $(prop ro.build.version.security_patch)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "RIL implementation label: $(prop gsm.version.ril-impl)"
+        echo "Note: the RIL implementation label alone does not identify the vendor RIL implementation."
+        ;;
+    --telemetry)
+        echo "--- Radio telemetry (read-only; no cipher inference) ---"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Network/service fields exposed by Android:"
+        dumpsys telephony.registry 2>/dev/null | grep -iE 'mServiceState|mSignalStrength|mDataNetworkType|mVoiceNetworkType|nrState|CellIdentity|CellSignalStrength' | head -30
+        echo "Cipher algorithms, RSRP/SNR, and modem temperature are not inferred from missing fields."
+        ;;
+    --5g-info)
+        echo "--- Android/MediaTek 5G information (read-only) ---"
+        echo "Platform: $(prop ro.board.platform)"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "Observed NR type property: $(prop vendor.ril.nr.type)"
+        echo "NR state/network fields exposed by Android:"
+        dumpsys telephony.registry 2>/dev/null | grep -iE 'nrState|nrFrequencyRange|displayInfo|mDataNetworkType|mServiceState' | head -20
+        echo "The NR type property is observational here; no network mode was changed."
+        ;;
+    --monitor-modem)
+        echo "--- MediaTek modem health snapshot (read-only) ---"
+        echo "Baseband: $(prop vendor.ril.gsm.version.baseband)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem RFS service: $(prop init.svc.vendor.modem-rfs-sh)"
+        echo "Dual-SIM mode observed: $(prop persist.vendor.radio.multisim.config)"
+        echo "MTK dual-SIM/DSBP support property (observed only): $(prop persist.vendor.radio.mtk_dsbp_support)"
+        echo "NR type property (observed only): $(prop vendor.ril.nr.type)"
+        echo "Subscriber identifiers, ICCID-derived values, and broad property dumps are intentionally omitted."
+        if [ "$VALUE" = "continuous" ]; then
+            echo "Continuous polling is unsupported until a validated MTK telemetry source is available."
+            exit 2
+        fi
+        ;;
+    --force-5g-sa|--force-5g-nsa)
+        unsupported "Unsupported on this MediaTek port: no verified MTK network-mode control interface."
+        ;;
+    --force-lte)
+        unsupported "Unsupported on this MediaTek port: network-mode indices and controls are not validated."
+        ;;
+    --block-2g)
+        unsupported "Unsupported on this MediaTek port: no verified control for disabling GSM was identified."
+        ;;
+    --reject-a50)
+        unsupported "Unsupported: no verified modem control for cipher rejection was identified."
+        ;;
+    --reset-radio)
+        unsupported "Disabled pending a reviewed MTK recovery procedure; radio reset behavior is not validated."
+        ;;
+    --panic|--panic-extended)
+        unsupported "Disabled pending a reviewed, tested emergency workflow."
+        ;;
+    --hard-shutdown)
+        unsupported "Disabled: guessed AT/TTY writes and Qualcomm sysfs paths are unsafe on this MediaTek device."
+        ;;
+    --recover)
+        unsupported "Disabled pending a verified recovery procedure; no network or firewall state will be reset blindly."
+        ;;
+    --geo-protect)
+        unsupported "Geo-protection is not implemented: no validated cell database or enforcement mechanism is connected."
+        ;;
+    --zero-day-protect)
+        unsupported "Zero-day protection is not implemented; properties and broadcasts do not patch firmware or sync CVE data."
+        ;;
+    --harden-sepolicy)
+        unsupported "No SELinux policy changes made. Collect relevant AVC denials and validate the required operation first."
+        ;;
+    --validate-panic)
+        echo "Read-only validation only; no network interfaces will be brought down."
+        echo "IPv4 DROP rules: $(iptables -S 2>/dev/null | grep -c -- '-j DROP')"
+        echo "IPv6 DROP rules: $(ip6tables -S 2>/dev/null | grep -c -- '-j DROP')"
+        echo "SELinux: $(getenforce 2>/dev/null || echo unknown)"
+        echo "MTK RIL service: $(prop init.svc.vendor.ril-daemon-mtk)"
+        echo "Modem status: $(prop vendor.ril.md_status_from_ccci)"
+        ;;
+    --forensic-dump)
+        echo "WARNING: this explicitly writes diagnostic files and may capture sensitive device/radio data."
+        echo "Review and protect the output before sharing it."
+        DUMP_DIR="/data/local/tmp/sentry_forensic_$(date +%Y%m%d_%H%M%S)"
+        if ! mkdir -p "$DUMP_DIR"; then
+            echo "Could not create diagnostic directory: $DUMP_DIR" >&2
+            exit 1
+        fi
+        dumpsys telephony.registry > "$DUMP_DIR/telephony_registry.txt" 2>&1
+        getprop | grep -Ei '^\[(vendor\.ril\.|vendor\.gsm\.ril\.|persist\.vendor\.radio\.)' \
+            | grep -Eiv 'iccid|subscriberid|imsi|imei|msisdn|phone.?number|serial' \
+            > "$DUMP_DIR/modem_properties_redacted.txt"
+        dumpsys radio > "$DUMP_DIR/radio_dump.txt" 2>&1
+        dmesg 2>/dev/null | grep -iE 'ril|modem|radio' > "$DUMP_DIR/kernel_logs.txt"
+        cat /proc/net/dev > "$DUMP_DIR/network_stats.txt"
+        chmod 600 "$DUMP_DIR"/*.txt 2>/dev/null
+        echo "Diagnostic files written to: $DUMP_DIR"
+        echo "Review all files for sensitive information before sharing."
+        ;;
     *)
-        echo "Usage: sentry-ctl [--force-5g-sa|--force-5g-nsa|--force-lte|--reset-radio|--panic|--panic-extended|--block-2g|--reject-a50|--telemetry|--fingerprint|--status|--monitor-modem|--geo-protect|--forensic-dump|--zero-day-protect|--hard-shutdown|--validate-panic|--recover|--5g-info|--harden-sepolicy]"
+        echo "Usage: sentry-ctl [--status|--fingerprint|--telemetry|--5g-info|--monitor-modem [continuous]|--force-5g-sa|--force-5g-nsa|--force-lte|--block-2g|--reject-a50|--reset-radio|--panic|--panic-extended|--hard-shutdown|--recover|--geo-protect|--zero-day-protect|--harden-sepolicy|--validate-panic|--forensic-dump]"
+        exit 2
         ;;
 esac
