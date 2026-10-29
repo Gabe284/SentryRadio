@@ -1170,6 +1170,26 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun resetWlan() {
+        viewModelScope.launch {
+            if (!_dashboardState.value.hasRoot) {
+                _syncStatus.emit("Wi-Fi reset requires root access.")
+                return@launch
+            }
+            val disabled = RootRepository.execute("svc wifi disable")
+            kotlinx.coroutines.delay(1500)
+            val enabled = RootRepository.execute("svc wifi enable")
+            if (disabled.success && enabled.success) {
+                _syncStatus.emit("Wi-Fi disable/enable commands returned success; verify connectivity.")
+            } else {
+                _syncStatus.emit(
+                    "Wi-Fi reset incomplete. Disable: ${commandFailureDetail(disabled)}; " +
+                        "enable: ${commandFailureDetail(enabled)}"
+                )
+            }
+        }
+    }
+
     private fun commandFailureDetail(result: RootRepository.ShellResult): String =
         listOf(result.error, result.output)
             .map { it.trim() }
