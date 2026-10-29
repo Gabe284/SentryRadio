@@ -29,8 +29,8 @@ case "$CHIPSET" in
         ;;
 esac
 
-[ -x "$BACKEND" ] || {
+[ -r "$BACKEND" ] || {
     echo "Sentry: selected chipset backend is missing or not executable: $BACKEND" >&2
     exit 1
 }
-exec "$BACKEND" "$@"
+exec sh "$BACKEND" "$@"
