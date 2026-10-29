@@ -108,15 +108,7 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().userAgentValue = packageName
         checkAndRequestPermissions()
         
-        // Update Check mit dynamischer Version
-        val currentVersion = VersionUtils.getCurrentVersion(this)
-        UpdateManager.setUpdateCallback(object : UpdateManager.UpdateCallback {
-            override fun onUpdateAvailable(currentVersion: String, latestVersion: String) {
-                // Update-Dialog wird in der UI angezeigt
-            }
-        })
-        UpdateManager.checkForUpdates(this, currentVersion)
-        
+
         setContent {
             IMSICatcherDetector2Theme {
                 MainContainer(viewModel)
