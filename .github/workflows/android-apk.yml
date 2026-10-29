@@ -8,12 +8,24 @@ on:
     paths:
       - 'app/**'
       - 'gradle/**'
-      - '*.gradle.kts'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'settings.gradle*'
+      - 'build.gradle*'
       - 'gradle.properties'
       - '.github/workflows/android-apk.yml'
   pull_request:
     branches:
       - mtk-kansas
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'settings.gradle*'
+      - 'build.gradle*'
+      - 'gradle.properties'
+      - '.github/workflows/android-apk.yml'
 
 permissions:
   contents: read
@@ -49,6 +61,9 @@ jobs:
 
       - name: Set up Gradle caching
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # Let branch pushes populate a reusable cache; PRs only read it.
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Print toolchain
         run: |
@@ -57,7 +72,7 @@ jobs:
           sdkmanager --list_installed
 
       - name: Build debug APK and run unit tests
-        run: ./gradlew --no-daemon --stacktrace assembleDebug testDebugUnitTest
+        run: ./gradlew --no-daemon --build-cache --stacktrace assembleDebug testDebugUnitTest
 
       - name: Verify packaged MediaTek module baseline
         shell: bash
