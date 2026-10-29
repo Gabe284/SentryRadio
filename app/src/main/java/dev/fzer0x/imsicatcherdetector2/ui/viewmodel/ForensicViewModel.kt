@@ -1112,39 +1112,54 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+    private fun isMediaTekPort(): Boolean {
+        val chipset = _dashboardState.value.detectedChipset
+        return chipset.contains("MEDIATEK", ignoreCase = true) ||
+            chipset.startsWith("MT", ignoreCase = true)
+    }
+
     fun updateAdvancedTelemetry(value: Boolean) { _settings.update { it.copy(advancedTelemetry = value) }; prefs.edit { putBoolean("advanced_telemetry", value) }
         if (_dashboardState.value.isHardeningModuleActive) {
             viewModelScope.launch {
-                try {
-                    val result = RootRepository.execute("setprop persist.sentry.advanced_telemetry ${if (value) 1 else 0}")
-                    _syncStatus.emit("Advanced Telemetry ${if (value) "enabled" else "disabled"}: ${if (result.success) "Success" else "Failed - ${result.error}"}")
-                } catch (e: Exception) {
-                    _syncStatus.emit("Advanced Telemetry failed: ${e.message}")
+                if (isMediaTekPort()) {
+                    _syncStatus.emit("Advanced telemetry is not implemented by the MediaTek backend; no system property was changed.")
+                    return@launch
                 }
+                val result = RootRepository.execute("setprop persist.sentry.advanced_telemetry ${if (value) 1 else 0}")
+                _syncStatus.emit(
+                    if (result.success) "Advanced telemetry property set; runtime support is not verified."
+                    else "Advanced telemetry failed: ${commandFailureDetail(result)}"
+                )
             }
         }
     }
     fun updateExtendedPanicMode(value: Boolean) { _settings.update { it.copy(extendedPanicMode = value) }; prefs.edit { putBoolean("extended_panic_mode", value) }
         if (_dashboardState.value.isHardeningModuleActive) {
             viewModelScope.launch {
-                try {
-                    val result = RootRepository.execute("setprop persist.sentry.panic_extended ${if (value) 1 else 0}")
-                    _syncStatus.emit("Extended Panic Mode ${if (value) "enabled" else "disabled"}: ${if (result.success) "Success" else "Failed - ${result.error}"}")
-                } catch (e: Exception) {
-                    _syncStatus.emit("Extended Panic Mode failed: ${e.message}")
+                if (isMediaTekPort()) {
+                    _syncStatus.emit("Extended panic mode is not implemented by the MediaTek backend; no system property was changed.")
+                    return@launch
                 }
+                val result = RootRepository.execute("setprop persist.sentry.panic_extended ${if (value) 1 else 0}")
+                _syncStatus.emit(
+                    if (result.success) "Extended panic preference property set; runtime support is not verified."
+                    else "Extended panic setting failed: ${commandFailureDetail(result)}"
+                )
             }
         }
     }
     fun updateRealTimeModemMonitoring(value: Boolean) { _settings.update { it.copy(realTimeModemMonitoring = value) }; prefs.edit { putBoolean("real_time_modem_monitoring", value) }
         if (_dashboardState.value.isHardeningModuleActive) {
             viewModelScope.launch {
-                try {
-                    val result = RootRepository.execute("setprop persist.sentry.continuous_monitor ${if (value) 1 else 0}")
-                    _syncStatus.emit("Real-time Modem Monitoring ${if (value) "enabled" else "disabled"}: ${if (result.success) "Success" else "Failed - ${result.error}"}")
-                } catch (e: Exception) {
-                    _syncStatus.emit("Real-time Modem Monitoring failed: ${e.message}")
+                if (isMediaTekPort()) {
+                    _syncStatus.emit("Continuous modem monitoring is not implemented by the MediaTek backend; no system property was changed.")
+                    return@launch
                 }
+                val result = RootRepository.execute("setprop persist.sentry.continuous_monitor ${if (value) 1 else 0}")
+                _syncStatus.emit(
+                    if (result.success) "Continuous-monitor property set; runtime support is not verified."
+                    else "Continuous modem monitoring failed: ${commandFailureDetail(result)}"
+                )
             }
         }
     }
