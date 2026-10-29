@@ -58,6 +58,14 @@ Add your API key in the app settings (now encrypted in Keystore):
 
 ---
 # SentryRadio  Changelog
+
+## v0.8.1 — MediaTek Kansas maintenance
+
+- Maintenance baseline updated to the official source tag `19-0.8.0`; no upstream source files are missing from the base revision.
+- Preserves the `mtk-kansas` device-port changes: passive boot service, no unverified radio properties or broad SELinux allow rules, chipset-aware dispatcher, and explicit refusal of unvalidated MediaTek radio controls.
+- Preserves the existing encrypted-preferences compatibility behavior: an unreadable encrypted store does not crash ViewModel startup, and encrypted data is not automatically deleted. Secret persistence is disabled until the user re-enters API keys.
+- App version: `0.8.1`, versionCode `20`. This is a fork maintenance version, not an upstream release.
+
 ## (v0.7.0)
 
 **Repository:** `SentryRadio` (`dev.fzer0x.imsicatcherdetector2`)  
