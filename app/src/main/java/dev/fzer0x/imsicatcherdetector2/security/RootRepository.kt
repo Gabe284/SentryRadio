@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 object RootRepository {
     private const val TAG = "RootRepository"
     private const val SENTRY_MODULE_DIR = "/data/adb/modules/sentry_radio_hardening"
-    private const val SENTRY_CTL_PATH = "$SENTRY_MODULE_DIR/system/bin/sentry-ctl"
+    private const val SENTRY_CTL_PATH = "/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl"
 
     init {
         // Globale Konfiguration für libsu
