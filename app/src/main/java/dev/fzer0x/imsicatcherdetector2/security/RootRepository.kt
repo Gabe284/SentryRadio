@@ -98,6 +98,35 @@ object RootRepository {
         Shell.cmd("[ -f \"$path\" ] || [ -d \"$path\" ]").exec().isSuccess
     }
 
+    /**
+     * Detects the chipset from read-only Android properties and returns its
+     * backend profile. Unknown/conflicting fingerprints never select a vendor backend.
+     */
+    suspend fun detectChipsetProfile(): ChipsetProfile = withContext(Dispatchers.IO) {
+        val result = execute(
+            "getprop ro.hardware.soc.manufacturer; " +
+                "getprop ro.board.platform; " +
+                "getprop ro.hardware; " +
+                "getprop ro.baseband; " +
+                "getprop gsm.version.baseband; " +
+                "getprop vendor.ril.gsm.version.baseband; " +
+                "getprop init.svc.vendor.ril-daemon-mtk"
+        )
+        val values = result.output.split("\\n")
+        val keys = listOf(
+            "ro.hardware.soc.manufacturer",
+            "ro.board.platform",
+            "ro.hardware",
+            "ro.baseband",
+            "gsm.version.baseband",
+            "vendor.ril.gsm.version.baseband",
+            "init.svc.vendor.ril-daemon-mtk"
+        )
+        ChipsetProfile.detect(keys.mapIndexed { index, key ->
+            key to values.getOrElse(index) { "" }.trim()
+        }.toMap())
+    }
+
     data class ShellResult(
         val success: Boolean,
         val output: String,
