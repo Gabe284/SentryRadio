@@ -639,7 +639,17 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
     fun checkSystemStatus() {
         viewModelScope.launch {
             val hasRoot = RootRepository.isRootAvailable()
-            val isModule = if (hasRoot) RootRepository.fileExists("/data/adb/modules/sentry_radio_hardening/module.prop") else false
+            // A module directory can remain installed while KernelSU/Magisk has
+            // disabled it. Do not expose its controls as active when disable/remove
+            // markers are present.
+            val moduleState = if (hasRoot) {
+                RootRepository.execute(
+                    "test -f /data/adb/modules/sentry_radio_hardening/module.prop && " +
+                        "[ ! -f /data/adb/modules/sentry_radio_hardening/disable ] && " +
+                        "[ ! -f /data/adb/modules/sentry_radio_hardening/remove ]"
+                )
+            } else null
+            val isModule = moduleState?.success == true
             val isXposed = isXposedModuleActive()
             
             // Check module version and updates
