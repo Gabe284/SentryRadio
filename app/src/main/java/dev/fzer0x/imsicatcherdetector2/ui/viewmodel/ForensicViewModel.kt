@@ -834,20 +834,21 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         _dashboardState.update { it.copy(isLoadingCve = true) }
         
         try {
-            val rawChipset = if (_dashboardState.value.hasRoot) {
-                RootRepository.execute("getprop ro.board.platform").output.trim().ifEmpty { Build.HARDWARE }
+            // Read the platform and vendor-specific baseband in one root-shell round trip.
+            // MediaTek devices commonly expose the useful version under vendor.ril.gsm.version.baseband
+            // while gsm.version.baseband may be empty or generic.
+            val profile = if (_dashboardState.value.hasRoot) {
+                RootRepository.detectChipsetProfile()
             } else {
-                Build.HARDWARE
+                null
             }
+            val rawChipset = profile?.platform?.takeIf { it.isNotBlank() } ?: Build.HARDWARE
             
             // Convert codenames to technical chipset names for API compatibility
             val chipset = convertCodenameToTechnicalName(rawChipset)
             
-            val baseband = if (_dashboardState.value.hasRoot) {
-                RootRepository.execute("getprop gsm.version.baseband").output.trim().ifEmpty { Build.getRadioVersion() ?: "Unknown" }
-            } else {
-                Build.getRadioVersion() ?: "Unknown"
-            }
+            val baseband = profile?.baseband?.takeIf { it.isNotBlank() }
+                ?: (Build.getRadioVersion() ?: "Unknown")
             
             val securityPatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 Build.VERSION.SECURITY_PATCH
