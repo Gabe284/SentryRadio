@@ -141,6 +141,34 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
      * it may contain user API keys. In recovery mode, secret-key reads return blank
      * and writes are refused until the user deliberately re-enters the keys.
      */
+    /**
+     * Recovery storage uses a new file and a distinct Keystore alias. If the original
+     * encrypted keyset cannot be opened, keep the original file untouched and allow
+     * the user to re-enter API keys into a fresh encrypted store.
+     */
+    private var useRecoverySecurePrefs = false
+
+    private val recoverySecurePrefs by lazy {
+        try {
+            val recoveryMasterKey = MasterKey.Builder(
+                application,
+                "sentry_secure_settings_recovery_master_key"
+            )
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                application,
+                "sentry_secure_settings_recovery",
+                recoveryMasterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.e("ForensicViewModel", "Recovery secure storage unavailable", e)
+            null
+        }
+    }
+
     private val encryptedPrefs by lazy {
         try {
             val masterKey = MasterKey.Builder(application)
@@ -154,34 +182,61 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            Log.e("ForensicViewModel", "Secure settings unavailable; preserving encrypted data and disabling secret persistence", e)
-            null
+            Log.e("ForensicViewModel", "Original secure settings are unreadable; preserving them and opening separate recovery storage", e)
+            useRecoverySecurePrefs = true
+            recoverySecurePrefs
         }
     }
 
     private fun readSecret(key: String): String {
         return try {
-            encryptedPrefs?.getString(key, "") ?: ""
+            val securePrefs = if (useRecoverySecurePrefs) recoverySecurePrefs else encryptedPrefs
+            securePrefs?.getString(key, "") ?: ""
         } catch (e: Exception) {
-            Log.e("ForensicViewModel", "Unable to decrypt secure setting '$key'; leaving encrypted storage untouched", e)
-            null
-        } ?: ""
+            Log.e("ForensicViewModel", "Unable to decrypt secure setting '$key'; preserving original storage and switching to recovery storage", e)
+            useRecoverySecurePrefs = true
+            try {
+                recoverySecurePrefs?.getString(key, "") ?: ""
+            } catch (recoveryError: Exception) {
+                Log.e("ForensicViewModel", "Unable to read recovery secure setting '$key'", recoveryError)
+                ""
+            }
+        }
     }
 
     private fun saveSecret(key: String, value: String): Boolean {
-        return try {
-            val securePrefs = encryptedPrefs
-            if (securePrefs == null) {
-                viewModelScope.launch { _syncStatus.emit("Secure settings are unreadable. API key was not saved; encrypted data was preserved.") }
-                return false
+        try {
+            val securePrefs = if (useRecoverySecurePrefs) recoverySecurePrefs else encryptedPrefs
+            if (securePrefs != null) {
+                securePrefs.edit { putString(key, value) }
+                if (useRecoverySecurePrefs) {
+                    viewModelScope.launch {
+                        _syncStatus.emit("API key saved in new encrypted recovery storage. Previous encrypted data was preserved; re-enter any older keys that are missing.")
+                    }
+                }
+                return true
             }
-            securePrefs.edit { putString(key, value) }
-            true
         } catch (e: Exception) {
-            Log.e("ForensicViewModel", "Unable to save secure setting '$key'", e)
-            viewModelScope.launch { _syncStatus.emit("Secure settings error. API key was not saved; encrypted data was preserved.") }
-            false
+            Log.e("ForensicViewModel", "Unable to save secure setting '$key'; switching to separate recovery storage", e)
+            useRecoverySecurePrefs = true
+            try {
+                val recoveryPrefs = recoverySecurePrefs
+                if (recoveryPrefs != null) {
+                    recoveryPrefs.edit { putString(key, value) }
+                    viewModelScope.launch {
+                        _syncStatus.emit("API key saved in new encrypted recovery storage. Previous encrypted data was preserved; re-enter any older keys that are missing.")
+                    }
+                    return true
+                }
+            } catch (recoveryError: Exception) {
+                Log.e("ForensicViewModel", "Unable to save secure setting '$key' in recovery storage", recoveryError)
+            }
         }
+
+        viewModelScope.launch {
+            _syncStatus.emit("Secure storage is unavailable. API key was not saved; existing encrypted data was preserved.")
+        }
+        return false
     }
 
     private val prefs = application.getSharedPreferences("sentry_settings", Context.MODE_PRIVATE)
