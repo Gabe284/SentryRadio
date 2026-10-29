@@ -112,7 +112,7 @@ object RootRepository {
                 "getprop vendor.ril.gsm.version.baseband; " +
                 "getprop init.svc.vendor.ril-daemon-mtk"
         )
-        val values = result.output.split("\\n")
+        val values = result.output.split("\n")
         val keys = listOf(
             "ro.hardware.soc.manufacturer",
             "ro.board.platform",
