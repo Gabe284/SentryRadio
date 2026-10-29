@@ -120,9 +120,12 @@ object RootRepository {
     /** True when the module files are installed, even if the module is disabled. */
     suspend fun isSentryModuleInstalled(): Boolean = fileExists("$SENTRY_MODULE_DIR/module.prop")
 
+    /** True when a device-wide disable marker exists; its effect can vary by root manager. */
+    suspend fun hasGlobalModuleDisableMarker(): Boolean = fileExists("/data/adb/modules/disable")
+
     /**
-     * KernelSU/Magisk modules are disabled by a marker file named "disable".
-     * Never infer active status from module.prop alone.
+     * Module-specific disable/remove markers mean inactive. A device-wide marker is
+     * handled separately as an unknown state, because its semantics are not assumed.
      */
     suspend fun isSentryModuleEnabled(): Boolean = withContext(Dispatchers.IO) {
         try {
