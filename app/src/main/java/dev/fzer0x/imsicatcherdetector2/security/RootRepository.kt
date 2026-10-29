@@ -40,7 +40,18 @@ object RootRepository {
      */
     suspend fun execute(command: String): ShellResult = withContext(Dispatchers.IO) {
         return@withContext try {
-            val result = Shell.cmd(command).exec()
+            // Avoid PATH resolution for sentry-ctl: stale binaries could bypass chipset detection.
+            // All app-originated CLI calls use this module dispatcher, which selects the backend.
+            val trimmedCommand = command.trimStart()
+            val resolvedCommand = if (
+                trimmedCommand == "sentry-ctl" || trimmedCommand.startsWith("sentry-ctl ")
+            ) {
+                "sh '/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl'" +
+                    trimmedCommand.removePrefix("sentry-ctl")
+            } else {
+                command
+            }
+            val result = Shell.cmd(resolvedCommand).exec()
             ShellResult(
                 success = result.isSuccess,
                 output = result.out.joinToString("\n"),
