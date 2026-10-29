@@ -646,14 +646,29 @@ fun SecurityScreen(viewModel: ForensicViewModel) {
 
         if (dashboardState.hasRoot) {
             item {
-                Text("SNAPDRAGON MODEM TELEMETRY", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    when {
+                        dashboardState.detectedChipset.contains("MEDIATEK", ignoreCase = true) ||
+                            dashboardState.detectedChipset.contains("MT6835", ignoreCase = true) -> "MEDIATEK RADIO TELEMETRY"
+                        dashboardState.detectedChipset.contains("QUALCOMM", ignoreCase = true) -> "QUALCOMM MODEM TELEMETRY"
+                        else -> "RADIO TELEMETRY"
+                    },
+                    color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold
+                )
                 Spacer(Modifier.height(12.dp))
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1F2D))) {
                     Column(Modifier.padding(16.dp)) {
                         val activeSim = if(dashboardState.activeSimSlot == 0) dashboardState.sim0 else dashboardState.sim1
                         DetailRow("Cipher Algorithm", activeSim.cipherAlgo)
                         DetailRow("RRC Connection", activeSim.rrcStatus)
-                        DetailRow("Modem Hardening", if(dashboardState.isHardeningModuleActive) "Active" else "Inactive (Root only)")
+                        DetailRow(
+                            "Modem Hardening",
+                            when {
+                                dashboardState.isHardeningModuleActive -> "Enabled"
+                                dashboardState.isHardeningModuleInstalled -> "Installed, but disabled"
+                                else -> "Not installed"
+                            }
+                        )
                     }
                 }
                 Spacer(Modifier.height(24.dp))
@@ -1010,7 +1025,13 @@ fun SettingsScreen(viewModel: ForensicViewModel) {
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text(
-                        "The Sentry Hardening Module provides deep system integration to enforce radio security and prevent IMSI Catcher attacks on the baseband level.",
+                        if (dashboardState.detectedChipset.contains("MEDIATEK", ignoreCase = true) ||
+                            dashboardState.detectedChipset.contains("MT6835", ignoreCase = true)
+                        ) {
+                            "MediaTek port: the module uses a passive boot service. Unverified radio controls remain unavailable; do not treat this as active baseband protection."
+                        } else {
+                            "The Sentry Hardening Module provides chipset-specific controls only where the backend has been validated."
+                        },
                         color = Color.Gray,
                         fontSize = 12.sp
                     )
@@ -1058,6 +1079,24 @@ fun SettingsScreen(viewModel: ForensicViewModel) {
                             Icon(Icons.Default.Refresh, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text(if (dashboardState.moduleUpdateAvailable) "UPDATE MODULE" else "REINSTALL MODULE", fontWeight = FontWeight.Bold)
+                        }
+                    } else if (dashboardState.isHardeningModuleInstalled) {
+                        Text(
+                            "Module files are installed but the module is disabled in KernelSU/Magisk. Enable it in the manager only after reviewing device-specific support; the MediaTek port remains passive.",
+                            color = Color.Yellow.copy(alpha = 0.8f),
+                            fontSize = 11.sp
+                        )
+                        if (dashboardState.moduleUpdateAvailable) {
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = { viewModel.installHardeningModule(context) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("UPDATE MODULE FILES", fontWeight = FontWeight.Bold)
+                            }
                         }
                     } else if (dashboardState.hasRoot) {
                         Button(
