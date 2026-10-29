@@ -981,7 +981,7 @@ fun SettingsScreen(viewModel: ForensicViewModel) {
                 StatusIndicator("XPOSED", dashboardState.isXposedActive, Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
-            StatusIndicator("HARDENING MODULE", dashboardState.isHardeningModuleActive, Modifier.fillMaxWidth())
+            StatusIndicator("MODULE ENABLED", dashboardState.isHardeningModuleActive, Modifier.fillMaxWidth())
             Spacer(Modifier.height(24.dp))
         }
 
@@ -1042,7 +1042,7 @@ fun SettingsScreen(viewModel: ForensicViewModel) {
                             Icon(Icons.Default.Check, contentDescription = null, tint = Color.Green)
                             Spacer(Modifier.width(8.dp))
                             Column {
-                                Text("Module installed and active", color = Color.Green, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Module configured enabled (runtime load not verified)", color = Color.Green, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("Version: ${dashboardState.currentModuleVersion}", color = Color.Gray, fontSize = 11.sp)
                             }
                         }
