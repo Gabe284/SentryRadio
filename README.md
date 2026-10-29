@@ -58,6 +58,13 @@ Add your API key in the app settings (now encrypted in Keystore):
 
 ---
 # SentryRadio  Changelog
+
+## v0.8.1 — encrypted settings recovery (fork maintenance)
+
+- Recover from an Android Keystore authentication failure while opening `EncryptedSharedPreferences` instead of crashing ViewModel creation with `AEADBadTagException`.
+- Recovery is limited to the encrypted settings file and AndroidX default master-key alias; it does not disable Keystore, relax SELinux, or fall back to plaintext storage.
+- Saved API keys in the encrypted store may need to be entered again after recovery.
+- Android app version: `0.8.1` (versionCode `20`). This maintenance change does not claim to port every binary-only change from the upstream v0.8.0 release.
 ## (v0.7.0)
 
 **Repository:** `SentryRadio` (`dev.fzer0x.imsicatcherdetector2`)  
