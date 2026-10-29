@@ -1,6 +1,6 @@
 id=sentry_radio_hardening
 name=Sentry Radio Hardening
-version=v0.5.0
-versionCode=9
-author=fzer0x
-description=Advanced System Hardening for Sentry IMSI Catcher Detector. Enforces radio security, eBPF firewalling, and strict SELinux radio isolation.
+version=v0.5.0-mtk1
+versionCode=10
+author=fzer0x, Gabe284
+description=Conservative MediaTek port baseline; chipset-specific controls remain disabled pending validation.
