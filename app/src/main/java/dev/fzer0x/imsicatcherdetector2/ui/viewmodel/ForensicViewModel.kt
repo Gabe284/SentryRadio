@@ -168,17 +168,19 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         } ?: ""
     }
 
-    private fun saveSecret(key: String, value: String) {
-        try {
+    private fun saveSecret(key: String, value: String): Boolean {
+        return try {
             val securePrefs = encryptedPrefs
             if (securePrefs == null) {
                 viewModelScope.launch { _syncStatus.emit("Secure settings are unreadable. API key was not saved; encrypted data was preserved.") }
-                return
+                return false
             }
             securePrefs.edit { putString(key, value) }
+            true
         } catch (e: Exception) {
             Log.e("ForensicViewModel", "Unable to save secure setting '$key'", e)
             viewModelScope.launch { _syncStatus.emit("Secure settings error. API key was not saved; encrypted data was preserved.") }
+            false
         }
     }
 
@@ -1011,8 +1013,12 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         prefs.edit { putBoolean("show_blocked_events", value).apply() }
     }
     fun updateSensitivity(value: Int) { _settings.update { it.copy(sensitivity = value) }; prefs.edit { putInt("sensitivity", value).apply() } }
-    fun updateBeaconDbKey(key: String) { saveSecret("beacon_db_key", key); if (encryptedPrefs != null) _settings.update { it.copy(beaconDbKey = key) } }
-    fun updateOpenCellIdKey(key: String) { saveSecret("open_cell_id_key", key); if (encryptedPrefs != null) _settings.update { it.copy(openCellIdKey = key) } }
+    fun updateBeaconDbKey(key: String) {
+        if (saveSecret("beacon_db_key", key)) _settings.update { it.copy(beaconDbKey = key) }
+    }
+    fun updateOpenCellIdKey(key: String) {
+        if (saveSecret("open_cell_id_key", key)) _settings.update { it.copy(openCellIdKey = key) }
+    }
     fun updateUseOpenCellId(value: Boolean) { _settings.update { it.copy(useOpenCellId = value) }; prefs.edit { putBoolean("use_open_cell_id", value).apply() } }
     fun updateBlockGsm(value: Boolean) { 
         _settings.update { it.copy(blockGsm = value) }; 
@@ -1165,48 +1171,56 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun resetRadio() { viewModelScope.launch { if (_dashboardState.value.hasRoot) {
-        var result = RootRepository.execute("sentry-ctl --reset-radio")
-        if (!result.success) {
-            result = RootRepository.execute("/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl --reset-radio")
-        }
-        _syncStatus.emit("Radio Reset command sent") 
-    } } }
-    fun triggerPanic() { viewModelScope.launch { if (_dashboardState.value.hasRoot) { 
-        if (_settings.value.extendedPanicMode) {
-            // Extended Panic Mode mit verbesserter Implementierung
-            var result = RootRepository.execute("sentry-ctl --panic-extended")
-            if (!result.success) {
-                result = RootRepository.execute("/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl --panic-extended")
+    fun resetRadio() {
+        viewModelScope.launch {
+            if (!_dashboardState.value.hasRoot) {
+                _syncStatus.emit("Radio reset unavailable: root access is required.")
+                return@launch
             }
-            _syncStatus.emit("EXTENDED PANIC MODE ACTIVATED")
-            
-            // Zusätzliche Hardware-Shutdown Befehle
-            var hardShutdown = RootRepository.execute("sentry-ctl --hard-shutdown")
-            if (!hardShutdown.success) {
-                hardShutdown = RootRepository.execute("/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl --hard-shutdown")
-            }
-            _syncStatus.emit("Hardware radio shutdown executed")
-            
-            // Validierung nach 2 Sekunden
-            kotlinx.coroutines.delay(2000)
-            var validation = RootRepository.execute("sentry-ctl --validate-panic")
-            if (!validation.success) {
-                validation = RootRepository.execute("/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl --validate-panic")
-            }
-            if (validation.success) {
-                _syncStatus.emit("PANIC VALIDATION: ${validation.output}")
+            val result = RootRepository.execute("sentry-ctl --reset-radio")
+            if (result.success) {
+                _syncStatus.emit("Radio reset command completed: ${result.output}".trim())
             } else {
-                _syncStatus.emit("PANIC VALIDATION FAILED: ${validation.error}")
+                val detail = listOf(result.output, result.error).filter { it.isNotBlank() }.joinToString("\n")
+                _syncStatus.emit("Radio reset was not performed (unsupported or failed). ${detail}".trim())
             }
-        } else {
-            var result = RootRepository.execute("sentry-ctl --panic")
-            if (!result.success) {
-                result = RootRepository.execute("/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl --panic")
-            }
-            _syncStatus.emit("PANIC MODE ACTIVATED")
         }
-    } } }
+    }
+
+    fun triggerPanic() {
+        viewModelScope.launch {
+            if (!_dashboardState.value.hasRoot) {
+                _syncStatus.emit("Panic action unavailable: root access is required.")
+                return@launch
+            }
+
+            // Run the selected backend command once. In particular, do not chain
+            // guessed shutdown commands after an unsupported MediaTek response.
+            val command = if (_settings.value.extendedPanicMode) {
+                "sentry-ctl --panic-extended"
+            } else {
+                "sentry-ctl --panic"
+            }
+            val result = RootRepository.execute(command)
+            if (!result.success) {
+                val detail = listOf(result.output, result.error).filter { it.isNotBlank() }.joinToString("\n")
+                _syncStatus.emit("Panic action was not confirmed; no follow-up shutdown command was run. ${detail}".trim())
+                return@launch
+            }
+
+            _syncStatus.emit("Panic command completed: ${result.output}".trim())
+            if (_settings.value.extendedPanicMode) {
+                kotlinx.coroutines.delay(2000)
+                val validation = RootRepository.execute("sentry-ctl --validate-panic")
+                if (validation.success) {
+                    _syncStatus.emit("PANIC VALIDATION: ${validation.output}")
+                } else {
+                    val detail = listOf(validation.output, validation.error).filter { it.isNotBlank() }.joinToString("\n")
+                    _syncStatus.emit("PANIC VALIDATION FAILED: ${detail}")
+                }
+            }
+        }
+    }
     fun recoverFromPanic() { viewModelScope.launch { 
     if (_dashboardState.value.hasRoot && _dashboardState.value.isHardeningModuleActive) {
         var recovery = RootRepository.execute("sentry-ctl --recover")
@@ -1242,12 +1256,21 @@ fun validatePanicMode() { viewModelScope.launch {
     }
 } }
     
-fun triggerForensicDump() { viewModelScope.launch { if (_dashboardState.value.hasRoot && _dashboardState.value.isHardeningModuleActive) { 
-        RootRepository.execute("sentry-ctl --forensic-dump")
-        _syncStatus.emit("Forensic dump completed")
-    } else {
-        _syncStatus.emit("Forensic dump requires hardening module")
-    } } }
+fun triggerForensicDump() {
+        viewModelScope.launch {
+            if (!_dashboardState.value.hasRoot || !_dashboardState.value.isHardeningModuleActive) {
+                _syncStatus.emit("Forensic dump requires root and the hardening module.")
+                return@launch
+            }
+            val result = RootRepository.execute("sentry-ctl --forensic-dump")
+            if (result.success) {
+                _syncStatus.emit(result.output.ifBlank { "Forensic dump command completed." })
+            } else {
+                val detail = listOf(result.output, result.error).filter { it.isNotBlank() }.joinToString("\n")
+                _syncStatus.emit("Forensic dump failed: ${detail}")
+            }
+        }
+    }
     fun syncCveDatabase() { viewModelScope.launch { if (_dashboardState.value.hasRoot && _dashboardState.value.isHardeningModuleActive) { 
         RootRepository.execute("sentry-ctl --zero-day-protect sync")
         _syncStatus.emit("CVE database sync initiated")
