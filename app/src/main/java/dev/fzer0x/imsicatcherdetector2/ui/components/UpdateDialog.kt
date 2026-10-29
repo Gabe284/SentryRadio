@@ -148,7 +148,7 @@ fun UpdateDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 Text(
-                    "https://github.com/Gabe284/SentryRadio",
+                    "https://github.com/Gabe284/SentryRadio/releases",
 
                     color = Color.Cyan,
                     fontSize = 12.sp,
