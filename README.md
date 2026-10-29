@@ -36,6 +36,12 @@ Built for security researchers and privacy-conscious users, it provides deep ins
 
 ---
 
+## ⚠️ MediaTek Kansas port status
+
+This fork contains a conservative MediaTek MT6835/Kansas port. The hardening module's boot service is intentionally passive. Radio-mode forcing, GSM blocking, cipher rejection, modem reset, panic/firewall actions, geofencing enforcement, and CVE-triggered modem controls remain **unsupported until independently verified on this device**. The app reports those actions as unsupported or failed instead of claiming they were applied. Do not interpret an installed/enabled module marker as proof that baseband protection is active.
+
+The generic UI still contains controls shared with other chipsets; on this port, a setting may be saved locally without corresponding hardware enforcement. Verify the status message after every action. The optional module is not enabled automatically by installing its files.
+
 ## 📥 Installation
 
 1. Clone the repository:
