@@ -2,35 +2,43 @@ package dev.fzer0x.imsicatcherdetector2.security
 
 object VersionComparator {
     /**
-     * Vergleicht zwei Versionen im Format "versionCode-versionName" (z.B. 4-0.3.0)
-     * Rückgabe: 1 wenn remote > local, -1 wenn local > remote, 0 wenn gleich
+     * Compares versions in "versionCode-versionName" form.
+     * Returns 1 when remote is newer, -1 when local is newer, or 0 when equal.
+     *
+     * GitHub release tags sometimes contain only a semantic version. In that case
+     * the code is 0, so compare versionName rather than treating the missing code
+     * as newer/older than a real Android versionCode.
      */
     fun compare(local: String, remote: String): Int {
-        try {
-            val localParts = splitVersion(local)
-            val remoteParts = splitVersion(remote)
+        val localVersion = parse(local)
+        val remoteVersion = parse(remote)
 
-            for (i in 0 until maxOf(localParts.size, remoteParts.size)) {
-                val l = localParts.getOrElse(i) { 0 }
-                val r = remoteParts.getOrElse(i) { 0 }
-                if (r > l) return 1
-                if (l > r) return -1
-            }
-        } catch (e: Exception) {
-            return 0
+        if (localVersion.code > 0 && remoteVersion.code > 0 &&
+            localVersion.code != remoteVersion.code
+        ) {
+            return if (remoteVersion.code > localVersion.code) 1 else -1
         }
-        return 0
+
+        return compareParts(localVersion.nameParts, remoteVersion.nameParts)
     }
 
-    private fun splitVersion(v: String): List<Int> {
-        // Erwartetes Format: "versionCode-versionName" (z.B. "4-0.3.0")
-        val mainParts = v.split("-")
-        val versionCode = mainParts.getOrNull(0)?.toIntOrNull() ?: 0
-        val versionName = if (mainParts.size > 1) mainParts[1] else ""
-        
-        // VersionName in Teile aufteilen (z.B. "0.3.0" -> [0, 3, 0])
-        val versionNameParts = versionName.split(".").map { it.toIntOrNull() ?: 0 }
-        
-        return listOf(versionCode) + versionNameParts
+    private data class ParsedVersion(val code: Int, val nameParts: List<Int>)
+
+    private fun parse(value: String): ParsedVersion {
+        val separator = value.indexOf('-')
+        val code = if (separator >= 0) value.substring(0, separator).toIntOrNull() ?: 0 else 0
+        val name = if (separator >= 0) value.substring(separator + 1) else value
+        val parts = Regex("\\d+").findAll(name).mapNotNull { it.value.toIntOrNull() }.toList()
+        return ParsedVersion(code, parts)
+    }
+
+    private fun compareParts(local: List<Int>, remote: List<Int>): Int {
+        for (i in 0 until maxOf(local.size, remote.size)) {
+            val l = local.getOrElse(i) { 0 }
+            val r = remote.getOrElse(i) { 0 }
+            if (r > l) return 1
+            if (l > r) return -1
+        }
+        return 0
     }
 }
