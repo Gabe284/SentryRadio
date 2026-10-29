@@ -13,8 +13,8 @@ android {
         applicationId = "dev.fzer0x.imsicatcherdetector2"
         minSdk = 29
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.5.0"
+        versionCode = 20
+        versionName = "0.8.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

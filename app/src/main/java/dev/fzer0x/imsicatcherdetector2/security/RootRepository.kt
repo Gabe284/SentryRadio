@@ -12,6 +12,8 @@ import kotlinx.coroutines.withContext
  */
 object RootRepository {
     private const val TAG = "RootRepository"
+    private const val SENTRY_MODULE_DIR = "/data/adb/modules/sentry_radio_hardening"
+    private const val SENTRY_CTL_PATH = "/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl"
 
     init {
         // Globale Konfiguration für libsu
@@ -40,14 +42,27 @@ object RootRepository {
      */
     suspend fun execute(command: String): ShellResult = withContext(Dispatchers.IO) {
         return@withContext try {
-            // Avoid PATH resolution for sentry-ctl: stale binaries could bypass chipset detection.
-            // All app-originated CLI calls use this module dispatcher, which selects the backend.
+            // Guard both the command alias and absolute-path fallback. Otherwise a caller
+            // could bypass the disabled-module check by retrying the full path.
             val trimmedCommand = command.trimStart()
+            val isSentryCommand =
+                trimmedCommand == "sentry-ctl" ||
+                trimmedCommand.startsWith("sentry-ctl ") ||
+                trimmedCommand.contains(SENTRY_CTL_PATH)
+            if (isSentryCommand && !isSentryModuleEnabled()) {
+                return@withContext ShellResult(
+                    success = false,
+                    output = "",
+                    error = "Sentry hardening module is missing or disabled; no command was executed.",
+                    exitCode = 126
+                )
+            }
+
+            // Avoid PATH resolution for sentry-ctl: the dispatcher must select the backend.
             val resolvedCommand = if (
                 trimmedCommand == "sentry-ctl" || trimmedCommand.startsWith("sentry-ctl ")
             ) {
-                "sh '/data/adb/modules/sentry_radio_hardening/system/bin/sentry-ctl'" +
-                    trimmedCommand.removePrefix("sentry-ctl")
+                "sh '$SENTRY_CTL_PATH'" + trimmedCommand.removePrefix("sentry-ctl")
             } else {
                 command
             }
@@ -100,6 +115,30 @@ object RootRepository {
         }
         
         lastResult ?: ShellResult(false, "", "All retries failed", -1)
+    }
+
+    /** True when the module files are installed, even if the module is disabled. */
+    suspend fun isSentryModuleInstalled(): Boolean = fileExists("$SENTRY_MODULE_DIR/module.prop")
+
+    /** True when a device-wide disable marker exists; its effect can vary by root manager. */
+    suspend fun hasGlobalModuleDisableMarker(): Boolean = fileExists("/data/adb/modules/disable")
+
+    /**
+     * Module-specific disable/remove markers mean inactive. A device-wide marker is
+     * handled separately as an unknown state, because its semantics are not assumed.
+     */
+    suspend fun isSentryModuleEnabled(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            Shell.cmd(
+                "[ -f '$SENTRY_MODULE_DIR/module.prop' ] && " +
+                    "[ ! -e '$SENTRY_MODULE_DIR/disable' ] && " +
+                    "[ ! -e '$SENTRY_MODULE_DIR/remove' ] && " +
+                    "[ ! -e '/data/adb/modules/disable' ]"
+            ).exec().isSuccess
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to determine Sentry module enabled state", e)
+            false
+        }
     }
 
     /**
