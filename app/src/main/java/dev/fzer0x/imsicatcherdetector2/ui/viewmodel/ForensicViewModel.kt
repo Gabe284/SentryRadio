@@ -134,17 +134,53 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
     private val forensicDao = ForensicDatabase.getDatabase(application).forensicDao()
     private val vulnerabilityManager = VulnerabilityManager(application)
     
-    private val masterKey = MasterKey.Builder(application)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    /**
+     * Encrypted preferences can become unreadable if their Android Keystore key
+     * no longer authenticates the stored Tink keyset. Never let that prevent the
+     * entire dashboard from starting, and never silently replace/delete the file:
+     * it may contain user API keys. In recovery mode, secret-key reads return blank
+     * and writes are refused until the user deliberately re-enters the keys.
+     */
+    private val encryptedPrefs by lazy {
+        try {
+            val masterKey = MasterKey.Builder(application)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                application,
+                "sentry_secure_settings",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.e("ForensicViewModel", "Secure settings unavailable; preserving encrypted data and disabling secret persistence", e)
+            null
+        }
+    }
 
-    private val encryptedPrefs = EncryptedSharedPreferences.create(
-        application,
-        "sentry_secure_settings",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private fun readSecret(key: String): String {
+        return try {
+            encryptedPrefs?.getString(key, "") ?: ""
+        } catch (e: Exception) {
+            Log.e("ForensicViewModel", "Unable to decrypt secure setting '$key'; leaving encrypted storage untouched", e)
+            null
+        } ?: ""
+    }
+
+    private fun saveSecret(key: String, value: String) {
+        try {
+            val securePrefs = encryptedPrefs
+            if (securePrefs == null) {
+                viewModelScope.launch { _syncStatus.emit("Secure settings are unreadable. API key was not saved; encrypted data was preserved.") }
+                return
+            }
+            securePrefs.edit { putString(key, value) }
+        } catch (e: Exception) {
+            Log.e("ForensicViewModel", "Unable to save secure setting '$key'", e)
+            viewModelScope.launch { _syncStatus.emit("Secure settings error. API key was not saved; encrypted data was preserved.") }
+        }
+    }
 
     private val prefs = application.getSharedPreferences("sentry_settings", Context.MODE_PRIVATE)
 
@@ -954,7 +990,7 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun loadSettings() = UserSettings(
-        updateRate = prefs.getInt("update_rate", 15), sensitivity = prefs.getInt("sensitivity", 1), logRootFeed = prefs.getBoolean("log_root_feed", false), logRadioMetrics = prefs.getBoolean("log_radio_metrics", false), logSuspiciousEvents = prefs.getBoolean("log_suspicious_events", false), autoPcap = prefs.getBoolean("auto_pcap", true), alarmSound = prefs.getBoolean("alarm_sound", true), alarmVibe = prefs.getBoolean("alarm_vibe", true), beaconDbKey = encryptedPrefs.getString("beacon_db_key", "") ?: "", openCellIdKey = encryptedPrefs.getString("open_cell_id_key", "") ?: "", useBeaconDb = prefs.getBoolean("use_beacon_db", true), useOpenCellId = prefs.getBoolean("use_open_cell_id", false), showBlockedEvents = prefs.getBoolean("show_blocked_events", false), blockGsm = prefs.getBoolean("block_gsm", false), rejectA50 = prefs.getBoolean("reject_a50", false), markFakeCells = prefs.getBoolean("mark_fake_cells", true), forceLte = prefs.getBoolean("force_lte", false), autoMitigation = prefs.getBoolean("auto_mitigation", false), zeroDayProtection = prefs.getBoolean("zero_day_protection", false), geoFencingProtection = prefs.getBoolean("geo_fencing_protection", false), advancedTelemetry = prefs.getBoolean("advanced_telemetry", false), extendedPanicMode = prefs.getBoolean("extended_panic_mode", false), realTimeModemMonitoring = prefs.getBoolean("real_time_modem_monitoring", false), appEnabled = prefs.getBoolean("app_enabled", true)
+        updateRate = prefs.getInt("update_rate", 15), sensitivity = prefs.getInt("sensitivity", 1), logRootFeed = prefs.getBoolean("log_root_feed", false), logRadioMetrics = prefs.getBoolean("log_radio_metrics", false), logSuspiciousEvents = prefs.getBoolean("log_suspicious_events", false), autoPcap = prefs.getBoolean("auto_pcap", true), alarmSound = prefs.getBoolean("alarm_sound", true), alarmVibe = prefs.getBoolean("alarm_vibe", true), beaconDbKey = readSecret("beacon_db_key"), openCellIdKey = readSecret("open_cell_id_key"), useBeaconDb = prefs.getBoolean("use_beacon_db", true), useOpenCellId = prefs.getBoolean("use_open_cell_id", false), showBlockedEvents = prefs.getBoolean("show_blocked_events", false), blockGsm = prefs.getBoolean("block_gsm", false), rejectA50 = prefs.getBoolean("reject_a50", false), markFakeCells = prefs.getBoolean("mark_fake_cells", true), forceLte = prefs.getBoolean("force_lte", false), autoMitigation = prefs.getBoolean("auto_mitigation", false), zeroDayProtection = prefs.getBoolean("zero_day_protection", false), geoFencingProtection = prefs.getBoolean("geo_fencing_protection", false), advancedTelemetry = prefs.getBoolean("advanced_telemetry", false), extendedPanicMode = prefs.getBoolean("extended_panic_mode", false), realTimeModemMonitoring = prefs.getBoolean("real_time_modem_monitoring", false), appEnabled = prefs.getBoolean("app_enabled", true)
     )
 
     fun updateUseBeaconDb(value: Boolean) { _settings.update { it.copy(useBeaconDb = value) }; prefs.edit { putBoolean("use_beacon_db", value).apply() } }
@@ -975,8 +1011,8 @@ class ForensicViewModel(application: Application) : AndroidViewModel(application
         prefs.edit { putBoolean("show_blocked_events", value).apply() }
     }
     fun updateSensitivity(value: Int) { _settings.update { it.copy(sensitivity = value) }; prefs.edit { putInt("sensitivity", value).apply() } }
-    fun updateBeaconDbKey(key: String) { _settings.update { it.copy(beaconDbKey = key) }; encryptedPrefs.edit { putString("beacon_db_key", key).apply() } }
-    fun updateOpenCellIdKey(key: String) { _settings.update { it.copy(openCellIdKey = key) }; encryptedPrefs.edit { putString("open_cell_id_key", key).apply() } }
+    fun updateBeaconDbKey(key: String) { saveSecret("beacon_db_key", key); if (encryptedPrefs != null) _settings.update { it.copy(beaconDbKey = key) } }
+    fun updateOpenCellIdKey(key: String) { saveSecret("open_cell_id_key", key); if (encryptedPrefs != null) _settings.update { it.copy(openCellIdKey = key) } }
     fun updateUseOpenCellId(value: Boolean) { _settings.update { it.copy(useOpenCellId = value) }; prefs.edit { putBoolean("use_open_cell_id", value).apply() } }
     fun updateBlockGsm(value: Boolean) { 
         _settings.update { it.copy(blockGsm = value) }; 
